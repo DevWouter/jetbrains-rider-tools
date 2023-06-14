@@ -51,9 +51,9 @@ def generate(out, className, fields, table) {
     
     // Check if any is primary
     if(fields.findAll{ it.isPrimary }.size() > 0) {
-        out.println "    void Insert(${dtoName} item);"
-        out.println "    void Update(${dtoName} item);"
-        out.println "    void Delete(${dtoName} item);"
+        out.println "    int Insert(${dtoName} item);"
+        out.println "    int Update(${dtoName} item);"
+        out.println "    int Delete(${dtoName} item);"
     }
     
     fields.findAll{ it.isForeign }.each() {
@@ -90,7 +90,7 @@ def generate(out, className, fields, table) {
     if(fields.findAll{ it.isPrimary }.size() > 0) {
         // Insert
         out.println ""
-        out.println "    public void Insert(${dtoName} item)"
+        out.println "    public int Insert(${dtoName} item)"
         out.println "    {"
         out.println "        var includePrimaryKey = true;"
         fields.findAll{ it.isPrimary }.each() {
@@ -100,13 +100,13 @@ def generate(out, className, fields, table) {
         out.println ""
         out.println "        if(includePrimaryKey)"
         out.println "        {"
-        out.println "            _dbConnection.Execute("
+        out.println "            return _dbConnection.Execute("
         out.println "                 \"INSERT INTO ${fullTableName} (${fields.collect{ it.colName }.join(", ")}) VALUES (${fields.collect{ "@" + it.colName }.join(", ")})\","
         out.println "                 item);"
         out.println "        }"
         out.println "        else"
         out.println "        {"
-        out.println "            _dbConnection.Execute("
+        out.println "            return _dbConnection.Execute("
         out.println "                 \"INSERT INTO ${fullTableName} (${fields.findAll{ !it.isPrimary }.collect{ it.colName }.join(", ")}) VALUES (${fields.findAll{ !it.isPrimary }.collect{ "@" + it.colName }.join(", ")})\","
         out.println "                 item);"
         out.println "        }"
@@ -114,18 +114,18 @@ def generate(out, className, fields, table) {
         
         // Update
         out.println ""
-        out.println "    public void Update(${dtoName} item)"
+        out.println "    public int Update(${dtoName} item)"
         out.println "    {"
-        out.println "        _dbConnection.Execute("
+        out.println "        return _dbConnection.Execute("
         out.println "            \"UPDATE ${fullTableName} SET ${fields.findAll{ !it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(", ")} WHERE ${fields.findAll{ it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
         out.println "            item);"
         out.println "    }"
         
         // Delete
         out.println ""
-        out.println "    public void Delete(${dtoName} item)"
+        out.println "    public int Delete(${dtoName} item)"
         out.println "    {"
-        out.println "        _dbConnection.Execute("
+        out.println "        return _dbConnection.Execute("
         out.println "            \"DELETE FROM ${fullTableName} WHERE ${fields.findAll{ it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
         out.println "            item);"
         out.println "    }"
