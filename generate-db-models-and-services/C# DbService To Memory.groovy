@@ -1,3 +1,4 @@
+import com.intellij.database.model.DasColumn
 import com.intellij.database.model.DasTable
 import com.intellij.database.model.ObjectKind
 import com.intellij.database.util.Case
@@ -22,48 +23,50 @@ notNullableTypes = [ "string", "byte[]" ]
 
 globalSbw = new StringBuilderWriter();
 
-SELECTION.filter { it instanceof DasTable && it.getKind() == ObjectKind.TABLE }.each { generate(it) }
+SELECTION.filter { it instanceof DasTable && it.getKind() == ObjectKind.TABLE }.each { generate(it as DasTable, globalSbw) }
 
 CLIPBOARD.set(globalSbw.toString());
 
-def generate(table) {
+def generate(DasTable table, StringBuilderWriter sbw) {
     def className = csharpName(table.getName())
     def fields = calcFields(table)
-    def sbw = new StringBuilderWriter();
-    globalSbw.withPrintWriter { out -> generate(out, className, fields, table) }
+    globalSbw.withPrintWriter { PrintWriter out -> generate(out, className, fields, table) }
 }
 
-def generate(out, className, fields, table) {
+def generate(PrintWriter out, String className, LinkedList<FieldInfo> fields, DasTable table) {
     def dtoName = "Db${className}";
     def tableName = table.getName();
     def namespaceName = table.getDasParent().name;
     def fullTableName = namespaceName == "dbo" ? tableName : "[${namespaceName}].[${tableName}]";
-   
+
     // Service interface
     out.println "[GeneratedCode(\"DevWouter/jetbrains-rider-tools\", \"0.0.0\")]"
     out.println "public interface I${className}DbService"
     out.println "{"
-    fields.findAll{ it.isPrimary }.each() {
+
+    def primaryFields = fields.findAll { it.isPrimary }
+    primaryFields.each() {
         // Param name should start with lower case
         def paramName = it.name[0].toLowerCase() + it.name.substring(1)
         out.println "    ${dtoName} GetBy${it.type == "Guid" ? "Guid" : "Id"}(${it.type} ${paramName});"
     }
-    
+
     // Check if any is primary
-    if(fields.findAll{ it.isPrimary }.size() > 0) {
+    // Entities without a public
+    if(primaryFields.size() > 0) {
         out.println "    int Insert(${dtoName} item);"
         out.println "    int Update(${dtoName} item);"
         out.println "    int Delete(${dtoName} item);"
     }
-    
+
     fields.findAll{ it.isForeign }.each() {
         // Param name should start with lower case
         def paramName = it.name[0].toLowerCase() + it.name.substring(1) + "s"
         out.println "    ${dtoName}[] FindBy${it.name.capitalize()}(IEnumerable<${it.type}> ${paramName});"
     }
-    
+
     out.println "}"
-    
+
     // Service implementation
     out.println ""
     out.println "[GeneratedCode(\"DevWouter/jetbrains-rider-tools\", \"0.0.0\")]"
@@ -76,27 +79,35 @@ def generate(out, className, fields, table) {
     out.println "        _dbConnection = dbConnection;"
     out.println "    }"
 
-    fields.findAll{ it.isPrimary }.each() {
+    primaryFields.each() {
         // Param name should start with lower case
         def paramName = it.name[0].toLowerCase() + it.name.substring(1)
-        def name = it.type == "Guid" ? "Guid" : "Id" 
+        def name = it.type == "Guid" ? "Guid" : "Id"
         out.println ""
         out.println "    public ${dtoName} GetBy${name}(${it.type} ${paramName})"
         out.println "    {"
         out.println "         return _dbConnection.QuerySingle<${dtoName}>(\"SELECT * FROM ${fullTableName} WHERE ${it.colName}=@id\", new { id = ${paramName} });"
         out.println "    }"
     }
-    
-    if(fields.findAll{ it.isPrimary }.size() > 0) {
+
+    if(primaryFields.size() > 0) {
         // Insert
         out.println ""
         out.println "    public int Insert(${dtoName} item)"
         out.println "    {"
-        out.println "        var includePrimaryKey = true;"
-        fields.findAll{ it.isPrimary }.each() {
-            out.println "            includePrimaryKey = includePrimaryKey && item.${it.colName} != ${it.type == "Guid" ? "Guid.Empty" : "0"};"
+        out.print(  "        var includePrimaryKey = ");
+
+        for (i in 0..<primaryFields.size()) {
+            if(i != 0) out.print(" && ")
+
+            def it = primaryFields[i];
+            out.print("item.${it.colName} != ")
+            if(it.type == "Guid") out.print("Guid.Empty")
+            else if(it.type == "int") out.print("0")
+            else out.print("string.Empty")
         }
-        
+
+        out.println(";")
         out.println ""
         out.println "        if(includePrimaryKey)"
         out.println "        {"
@@ -111,26 +122,26 @@ def generate(out, className, fields, table) {
         out.println "                 item);"
         out.println "        }"
         out.println "    }"
-        
+
         // Update
         out.println ""
         out.println "    public int Update(${dtoName} item)"
         out.println "    {"
         out.println "        return _dbConnection.Execute("
-        out.println "            \"UPDATE ${fullTableName} SET ${fields.findAll{ !it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(", ")} WHERE ${fields.findAll{ it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
+        out.println "            \"UPDATE ${fullTableName} SET ${fields.findAll{ !it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(", ")} WHERE ${primaryFields.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
         out.println "            item);"
         out.println "    }"
-        
+
         // Delete
         out.println ""
         out.println "    public int Delete(${dtoName} item)"
         out.println "    {"
         out.println "        return _dbConnection.Execute("
-        out.println "            \"DELETE FROM ${fullTableName} WHERE ${fields.findAll{ it.isPrimary }.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
+        out.println "            \"DELETE FROM ${fullTableName} WHERE ${primaryFields.collect{ it.colName + " = @" + it.name }.join(" AND ")}\","
         out.println "            item);"
         out.println "    }"
     }
-        
+
     fields.findAll{ it.isForeign }.each() {
         // Param name should start with lower case
         def paramName = it.name[0].toLowerCase() + it.name.substring(1) + "s"
@@ -147,22 +158,36 @@ def generate(out, className, fields, table) {
     out.println "}"
 }
 
-def calcFields(table) {
-    DasUtil.getColumns(table).reduce([]) { fields, col ->
-        def spec = Case.LOWER.apply(col.getDataType().getSpecification())
+LinkedList<FieldInfo> calcFields(DasTable table) {
+    def result = [] as LinkedList<FieldInfo>
+    def columns = DasUtil.getColumns(table)
+    for (DasColumn it in columns) {
+        def spec = Case.LOWER.apply(it.getDasType().getSpecification())
         def typeStr = typeMapping.find { p, t -> p.matcher(spec).find() }?.value ?: "string"
-        def nullable = col.isNotNull() || typeStr in notNullableTypes ? "" : "?"
-        fields += [[
-                           isPrimary: DasUtil.isPrimary(col),
-                           isForeign: DasUtil.isForeign(col),
-                           colName: col.getName(),
-                           name : csharpName(col.getName()),
-                           type : typeStr + nullable]]
+        def nullable = it.isNotNull() || typeStr in notNullableTypes ? "" : "?"
+        var fieldInfo = new FieldInfo();
+        fieldInfo.colName = it.getName()
+        fieldInfo.name = csharpName(it.getName())
+        fieldInfo.isPrimary = DasUtil.isPrimary(it)
+        fieldInfo.isForeign = DasUtil.isForeign(it)
+        fieldInfo.type = typeStr + nullable
+
+        result.add(fieldInfo)
     }
+
+    return result
 }
 
-def csharpName(str) {
-    com.intellij.psi.codeStyle.NameUtil.splitNameIntoWords(str)
-            .collect { Case.LOWER.apply(it).capitalize() }
+String csharpName(String str) {
+    def terms = com.intellij.psi.codeStyle.NameUtil.splitNameIntoWords(str)
+    return terms.collect { Case.LOWER.apply(it).capitalize() }
             .join("")
+}
+
+class FieldInfo {
+    public boolean isPrimary
+    public boolean isForeign
+    public String colName
+    public String name
+    public String type
 }
